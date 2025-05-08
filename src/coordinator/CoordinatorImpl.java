@@ -15,7 +15,9 @@ import common.TokenManager;
 public class CoordinatorImpl extends UnicastRemoteObject implements CoordinatorInterface {
     private Map<String, String> credentials = new HashMap<>();
     private Map<String, User> users = new HashMap<>();
-//    private List<String> nodeIPs = Arrays.asList("127.0.0.1");
+    private final Map<String, Integer> nodeLoadMap = new ConcurrentHashMap<>();
+
+    //    private List<String> nodeIPs = Arrays.asList("127.0.0.1");
 private List<String> nodeIPs = Arrays.asList("127.0.0.1:5000", "127.0.0.1:5001", "127.0.0.1:5002");
 
 
@@ -50,12 +52,14 @@ private List<String> nodeIPs = Arrays.asList("127.0.0.1:5000", "127.0.0.1:5001",
         if (user == null) return false;
 
         String department = user.getDepartment();
+        int successCount = 0;
+        int requiredSuccess = Math.max(1, nodeIPs.size() / 2 + 1); // مثال: 2 من 3
 
-        // ساويت يبعت للعقد التلاتة وفينك تعدل انو يبلش اول عقدة اذا فشلت ينتقل للتانية وهكذا
         for (String ipPort : nodeIPs) {
             String[] parts = ipPort.split(":");
             String ip = parts[0];
             int port = Integer.parseInt(parts[1]);
+
             try (
                     Socket socket = new Socket(ip, port);
                     DataOutputStream out = new DataOutputStream(socket.getOutputStream());
@@ -68,32 +72,23 @@ private List<String> nodeIPs = Arrays.asList("127.0.0.1:5000", "127.0.0.1:5001",
                 out.write(data);
 
                 String response = in.readUTF();
-
-                // طريقة تانية
-//                if ("OK".equals(response)) {
-//                    return true;
-//                }
-//            } catch (IOException e) {
-//                e.printStackTrace();
-//               // هون بتعالج في حال فشلت اول عقدة بتتجاهلها وبتنتقل للتانية
-//            }
-//        }
-//
-//        return false;
-//    }
                 if ("OK".equals(response)) {
-                    System.out.println("File uploaded to node: " + ip);
+                    successCount++;
+                    System.out.println("Uploaded to node: " + ipPort);
                 } else {
-                    System.out.println("Failed to upload to node: " + ip);
-                    return false;
+                    System.out.println("Failed on node: " + ipPort);
                 }
             } catch (IOException e) {
-                e.printStackTrace();
-                return false;
+                System.out.println("Node unreachable: " + ipPort);
+            }
+
+            // إذا تحقق العدد المطلوب من النجاح نعتبر العملية ناجحة
+            if (successCount >= requiredSuccess) {
+                return true;
             }
         }
 
-        return true;  // تم رفع الملف بنجاح إلى جميع العقد
+        return false; // لم تحقق العملية النصاب المطلوب
     }
     @Override
     public boolean deleteFile(String token, String filename) throws RemoteException {
@@ -101,6 +96,8 @@ private List<String> nodeIPs = Arrays.asList("127.0.0.1:5000", "127.0.0.1:5001",
         if (user == null) return false;
 
         String department = user.getDepartment();
+        int successCount = 0;
+        int requiredSuccess = Math.max(1, nodeIPs.size() / 2 + 1); // على الأقل 2 من 3
 
         for (String ipPort : nodeIPs) {
             String[] parts = ipPort.split(":");
@@ -115,10 +112,18 @@ private List<String> nodeIPs = Arrays.asList("127.0.0.1:5000", "127.0.0.1:5001",
                 out.writeUTF("delete");
                 out.writeUTF(department);
                 out.writeUTF(filename);
+
                 String response = in.readUTF();
-                if ("Deleted".equals(response)) return true;
+                if ("Deleted".equals(response)) {
+                    successCount++;
+                    System.out.println("Deleted from node: " + ipPort);
+                }
             } catch (IOException e) {
-                e.printStackTrace();
+                System.out.println("Failed to delete from node: " + ipPort);
+            }
+
+            if (successCount >= requiredSuccess) {
+                return true;
             }
         }
 
@@ -131,8 +136,8 @@ private List<String> nodeIPs = Arrays.asList("127.0.0.1:5000", "127.0.0.1:5001",
         if (user == null) return false;
 
         String department = user.getDepartment();
-
         boolean fileExists = false;
+
         for (String ipPort : nodeIPs) {
             String[] parts = ipPort.split(":");
             String ip = parts[0];
@@ -150,72 +155,86 @@ private List<String> nodeIPs = Arrays.asList("127.0.0.1:5000", "127.0.0.1:5001",
                 int size = in.readInt();
                 if (size != -1) {
                     fileExists = true;
-                    break;
+                    break; // كافٍ وجود الملف في عقدة واحدة
                 }
             } catch (IOException e) {
-                e.printStackTrace();
+                System.out.println("Node unreachable during edit check: " + ipPort);
             }
         }
 
-        if (!fileExists) {
-            return false;
-        }
+        if (!fileExists) return false;
 
+        // تعديل الملف عبر إعادة رفعه باستخدام منطق التحمل
         return uploadFile(token, filename, newData);
     }
 
 
     @Override
-public byte[] requestFile(String token, String filename) throws RemoteException {
-    User user = TokenManager.validateToken(token);
-    if (user == null) return null;
+    public byte[] requestFile(String token, String filename) throws RemoteException {
+        User user = TokenManager.validateToken(token);
+        if (user == null) return null;
 
-    ExecutorService executor = Executors.newFixedThreadPool(nodeIPs.size());
-    CompletionService<byte[]> completionService = new ExecutorCompletionService<>(executor);
-
-        for (String ipPort : nodeIPs) {
-            String[] parts = ipPort.split(":");
-            String ip = parts[0];
-            int port = Integer.parseInt(parts[1]);
-
-            completionService.submit(() -> {
-                try (
-                        Socket socket = new Socket(ip, port); //
-                DataOutputStream out = new DataOutputStream(socket.getOutputStream());
-                DataInputStream in = new DataInputStream(socket.getInputStream())
-            ) {
-                out.writeUTF("read");
-                out.writeUTF("any");
-                out.writeUTF(filename);
-
-                int size = in.readInt();
-                if (size == -1) return null;
-
-                byte[] data = new byte[size];
-                in.readFully(data);
-                return data;
-            } catch (IOException e) {
-                return null;
-            }
-        });
-    }
-
-    try {
-        for (int i = 0; i < nodeIPs.size(); i++) {
-            Future<byte[]> future = completionService.take(); // أول من يرد
-            byte[] result = future.get();
-            if (result != null) {
-                executor.shutdownNow();
-                return result;
+        // تهيئة الأحمال للعقد إذا لم تكن موجودة
+        synchronized (nodeLoadMap) {
+            for (String node : nodeIPs) {
+                nodeLoadMap.putIfAbsent(node, 0);
             }
         }
-    } catch (Exception e) {
-        e.printStackTrace();
-    } finally {
-        executor.shutdown();
-    }
 
-    return null;
-}
+        // ترتيب العقد حسب الحمل الأقل
+        List<String> sortedNodes = new ArrayList<>(nodeIPs);
+        sortedNodes.sort(Comparator.comparingInt(nodeLoadMap::get));
+
+        ExecutorService executor = Executors.newFixedThreadPool(nodeIPs.size());
+        CompletionService<byte[]> completionService = new ExecutorCompletionService<>(executor);
+
+        for (String ipPort : sortedNodes) {
+            completionService.submit(() -> {
+                nodeLoadMap.put(ipPort, nodeLoadMap.get(ipPort) + 1); // زيادة الحمل
+
+                String[] parts = ipPort.split(":");
+                String ip = parts[0];
+                int port = Integer.parseInt(parts[1]);
+
+                try (
+                        Socket socket = new Socket(ip, port);
+                        DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+                        DataInputStream in = new DataInputStream(socket.getInputStream())
+                ) {
+                    out.writeUTF("read");
+                    out.writeUTF("any");
+                    out.writeUTF(filename);
+
+                    int size = in.readInt();
+                    if (size == -1) return null;
+
+                    byte[] data = new byte[size];
+                    in.readFully(data);
+                    return data;
+                } catch (IOException e) {
+                    return null;
+                } finally {
+                    nodeLoadMap.put(ipPort, nodeLoadMap.get(ipPort) - 1); // تقليل الحمل بعد الانتهاء
+                }
+            });
+        }
+
+        try {
+            for (int i = 0; i < sortedNodes.size(); i++) {
+                Future<byte[]> future = completionService.take(); // أول نتيجة
+                byte[] result = future.get();
+                if (result != null) {
+                    executor.shutdownNow();
+                    return result;
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            executor.shutdown();
+        }
+
+        return null;
+    }
 
 }
