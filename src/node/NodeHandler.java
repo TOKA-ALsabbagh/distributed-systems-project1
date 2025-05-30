@@ -8,7 +8,10 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class NodeHandler implements Runnable {
+
+    //المقبس المرتبط بالعميل أو العقدة الأخرى.
     private Socket socket;
+    //المجلد الرئيسي الذي تخزن فيه هذه العقدة ملفاتها.
     private String storageRoot;
 
     // خريطة لتزامن الوصول إلى الملفات باستخدام قفل لكل ملف

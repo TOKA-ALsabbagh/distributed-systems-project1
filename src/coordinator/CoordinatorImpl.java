@@ -121,12 +121,10 @@ private List<String> nodeIPs = Arrays.asList("127.0.0.1:5000", "127.0.0.1:5001",
             } catch (IOException e) {
                 System.out.println("Failed to delete from node: " + ipPort);
             }
-
             if (successCount >= requiredSuccess) {
                 return true;
             }
         }
-
         return false;
     }
 
@@ -161,9 +159,7 @@ private List<String> nodeIPs = Arrays.asList("127.0.0.1:5000", "127.0.0.1:5001",
                 System.out.println("Node unreachable during edit check: " + ipPort);
             }
         }
-
         if (!fileExists) return false;
-
         // تعديل الملف عبر إعادة رفعه باستخدام منطق التحمل
         return uploadFile(token, filename, newData);
     }
@@ -173,14 +169,12 @@ private List<String> nodeIPs = Arrays.asList("127.0.0.1:5000", "127.0.0.1:5001",
     public byte[] requestFile(String token, String filename) throws RemoteException {
         User user = TokenManager.validateToken(token);
         if (user == null) return null;
-
         // تهيئة الأحمال للعقد إذا لم تكن موجودة
         synchronized (nodeLoadMap) {
             for (String node : nodeIPs) {
                 nodeLoadMap.putIfAbsent(node, 0);
             }
         }
-
         // ترتيب العقد حسب الحمل الأقل
         List<String> sortedNodes = new ArrayList<>(nodeIPs);
         sortedNodes.sort(Comparator.comparingInt(nodeLoadMap::get));
@@ -218,7 +212,6 @@ private List<String> nodeIPs = Arrays.asList("127.0.0.1:5000", "127.0.0.1:5001",
                 }
             });
         }
-
         try {
             for (int i = 0; i < sortedNodes.size(); i++) {
                 Future<byte[]> future = completionService.take(); // أول نتيجة
@@ -233,7 +226,6 @@ private List<String> nodeIPs = Arrays.asList("127.0.0.1:5000", "127.0.0.1:5001",
         } finally {
             executor.shutdown();
         }
-
         return null;
     }
 
